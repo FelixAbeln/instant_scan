@@ -36,6 +36,54 @@ static float normalized_ratio(float width, float height) {
     return width > height ? width / height : height / width;
 }
 
+static const instant_film_dimensions *find_film_dimensions(instant_film_type type) {
+    for (int i = 0; i < INSTANT_FILM_DIMENSIONS_COUNT; ++i) {
+        if (INSTANT_FILM_DIMENSIONS[i].type == type) {
+            return &INSTANT_FILM_DIMENSIONS[i];
+        }
+    }
+    return NULL;
+}
+
+static int corners_are_physically_landscape(const instant_point corners[4]) {
+    const float top = point_distance(corners[0], corners[1]);
+    const float bottom = point_distance(corners[3], corners[2]);
+    const float left = point_distance(corners[0], corners[3]);
+    const float right = point_distance(corners[1], corners[2]);
+    const float horiz = 0.5f * (top + bottom);
+    const float vert = 0.5f * (left + right);
+    return horiz >= vert;
+}
+
+static void rotate_template_90cw(
+    float *outer_w,
+    float *outer_h,
+    float *image_w,
+    float *image_h,
+    float *left_margin,
+    float *top_margin,
+    float *right_margin,
+    float *bottom_margin
+) {
+    const float old_outer_w = *outer_w;
+    const float old_outer_h = *outer_h;
+    const float old_image_w = *image_w;
+    const float old_image_h = *image_h;
+    const float old_left = *left_margin;
+    const float old_top = *top_margin;
+    const float old_right = *right_margin;
+    const float old_bottom = *bottom_margin;
+
+    *outer_w = old_outer_h;
+    *outer_h = old_outer_w;
+    *image_w = old_image_h;
+    *image_h = old_image_w;
+    *left_margin = old_bottom;
+    *top_margin = old_left;
+    *right_margin = old_top;
+    *bottom_margin = old_right;
+}
+
 static int is_white_border_pixel(const unsigned char *p) {
     const int r = p[0];
     const int g = p[1];
@@ -607,6 +655,11 @@ typedef struct {
     float image_w;
     float image_h;
     float inner_aspect;
+    float left_margin;
+    float top_margin;
+    float right_margin;
+    float bottom_margin;
+    int rotated;
 } instant_template_match;
 
 static float score_template_orientation(
@@ -702,9 +755,136 @@ static float score_template_orientation(
         out->image_w = iw;
         out->image_h = ih;
         out->inner_aspect = normalized_ratio(iw, ih);
+        out->left_margin = left_margin;
+        out->top_margin = top_margin;
+        out->right_margin = right_margin;
+        out->bottom_margin = bottom_margin;
+        out->rotated = rotated;
         out->confidence = clampf_local((score - 0.38f) / 0.36f, 0.0f, 1.0f);
     }
     return score;
+}
+
+static float score_refined_inner_window(
+    const unsigned char *rgba,
+    int width,
+    int height,
+    int stride,
+    const instant_homography *h,
+    float outer_w,
+    float outer_h,
+    float x0,
+    float y0,
+    float x1,
+    float y1,
+    float base_x0,
+    float base_y0,
+    float base_x1,
+    float base_y1
+) {
+    const float iw = x1 - x0;
+    const float ih = y1 - y0;
+    if (iw <= 4.0f || ih <= 4.0f) {
+        return -1.0e9f;
+    }
+    if (x0 <= 0.2f || y0 <= 0.2f || x1 >= outer_w - 0.2f || y1 >= outer_h - 0.2f) {
+        return -1.0e9f;
+    }
+
+    const float off_side = clampf_local(fminf(x0, outer_w - x1) * 0.50f, 1.0f, 5.0f);
+    const float off_top = clampf_local(y0 * 0.50f, 1.0f, 5.0f);
+    const float off_bottom = clampf_local((outer_h - y1) * 0.35f, 1.0f, 7.0f);
+    const float off_inside = clampf_local(fminf(iw, ih) * 0.035f, 1.0f, 5.0f);
+
+    const float top_edge = edge_transition_score(rgba, width, height, stride, h, x0, y0, x1, y0, 0.0f, -off_top, 0.0f, off_inside);
+    const float bottom_edge = edge_transition_score(rgba, width, height, stride, h, x0, y1, x1, y1, 0.0f, off_bottom, 0.0f, -off_inside);
+    const float left_edge = edge_transition_score(rgba, width, height, stride, h, x0, y0, x0, y1, -off_side, 0.0f, off_inside, 0.0f);
+    const float right_edge = edge_transition_score(rgba, width, height, stride, h, x1, y0, x1, y1, off_side, 0.0f, -off_inside, 0.0f);
+    const float edge_score = (top_edge + bottom_edge + left_edge + right_edge) * 0.25f;
+
+    const float outside_fill = (
+        border_fill_score(rgba, width, height, stride, h, x0, 0.0f, x1, y0) +
+        border_fill_score(rgba, width, height, stride, h, x0, y1, x1, outer_h) +
+        border_fill_score(rgba, width, height, stride, h, 0.0f, y0, x0, y1) +
+        border_fill_score(rgba, width, height, stride, h, x1, y0, outer_w, y1)
+    ) * 0.25f;
+
+    const float drift = fabsf(x0 - base_x0) + fabsf(y0 - base_y0) + fabsf(x1 - base_x1) + fabsf(y1 - base_y1);
+    const float penalty = 0.018f * drift;
+
+    return 0.74f * edge_score + 0.26f * outside_fill - penalty;
+}
+
+static int refine_inner_window_rect(
+    const unsigned char *rgba,
+    int width,
+    int height,
+    int stride,
+    const instant_point corners[4],
+    float outer_w,
+    float outer_h,
+    float base_x0,
+    float base_y0,
+    float base_x1,
+    float base_y1,
+    float *out_x0,
+    float *out_y0,
+    float *out_x1,
+    float *out_y1
+) {
+    instant_homography h;
+    if (!homography_from_canonical_to_source(outer_w, outer_h, corners, &h)) {
+        return 0;
+    }
+
+    float x0 = base_x0;
+    float y0 = base_y0;
+    float x1 = base_x1;
+    float y1 = base_y1;
+    const float min_inner_w = fmaxf(outer_w * 0.35f, 16.0f);
+    const float min_inner_h = fmaxf(outer_h * 0.35f, 16.0f);
+
+    for (int iter = 0; iter < 3; ++iter) {
+        float best = score_refined_inner_window(rgba, width, height, stride, &h, outer_w, outer_h, x0, y0, x1, y1, base_x0, base_y0, base_x1, base_y1);
+
+        float range = clampf_local(base_x0 * 0.85f, 1.0f, 6.0f);
+        for (int s = 0; s <= 12; ++s) {
+            float cand = (base_x0 - range) + (2.0f * range * (float)s / 12.0f);
+            cand = clampf_local(cand, 0.5f, x1 - min_inner_w);
+            float score = score_refined_inner_window(rgba, width, height, stride, &h, outer_w, outer_h, cand, y0, x1, y1, base_x0, base_y0, base_x1, base_y1);
+            if (score > best) { best = score; x0 = cand; }
+        }
+
+        range = clampf_local(base_y0 * 0.85f, 1.0f, 6.0f);
+        for (int s = 0; s <= 12; ++s) {
+            float cand = (base_y0 - range) + (2.0f * range * (float)s / 12.0f);
+            cand = clampf_local(cand, 0.5f, y1 - min_inner_h);
+            float score = score_refined_inner_window(rgba, width, height, stride, &h, outer_w, outer_h, x0, cand, x1, y1, base_x0, base_y0, base_x1, base_y1);
+            if (score > best) { best = score; y0 = cand; }
+        }
+
+        range = clampf_local((outer_w - base_x1) * 0.85f, 1.0f, 6.0f);
+        for (int s = 0; s <= 12; ++s) {
+            float cand = (base_x1 - range) + (2.0f * range * (float)s / 12.0f);
+            cand = clampf_local(cand, x0 + min_inner_w, outer_w - 0.5f);
+            float score = score_refined_inner_window(rgba, width, height, stride, &h, outer_w, outer_h, x0, y0, cand, y1, base_x0, base_y0, base_x1, base_y1);
+            if (score > best) { best = score; x1 = cand; }
+        }
+
+        range = clampf_local((outer_h - base_y1) * 0.85f, 1.0f, 8.0f);
+        for (int s = 0; s <= 12; ++s) {
+            float cand = (base_y1 - range) + (2.0f * range * (float)s / 12.0f);
+            cand = clampf_local(cand, y0 + min_inner_h, outer_h - 0.5f);
+            float score = score_refined_inner_window(rgba, width, height, stride, &h, outer_w, outer_h, x0, y0, x1, cand, base_x0, base_y0, base_x1, base_y1);
+            if (score > best) { best = score; y1 = cand; }
+        }
+    }
+
+    *out_x0 = x0;
+    *out_y0 = y0;
+    *out_x1 = x1;
+    *out_y1 = y1;
+    return 1;
 }
 
 static instant_template_match classify_film_by_inner_template(
@@ -953,6 +1133,87 @@ instant_result instant_scan_rgba(
         result.corners[i] = corners[i];
     }
 
+    const instant_film_dimensions *film = find_film_dimensions(type);
+    if (film) {
+        float outer_w = film->outer_width_mm;
+        float outer_h = film->outer_height_mm;
+        float image_w = film->image_width_mm;
+        float image_h = film->image_height_mm;
+        float left_margin = film->image_left_mm;
+        float top_margin = film->image_top_mm;
+        float right_margin = film->image_right_mm;
+        float bottom_margin = film->image_bottom_mm;
+
+        if (template_match.type == type && template_match.score > 0.0f) {
+            outer_w = template_match.canonical_w;
+            outer_h = template_match.canonical_h;
+            image_w = template_match.image_w;
+            image_h = template_match.image_h;
+            left_margin = template_match.left_margin;
+            top_margin = template_match.top_margin;
+            right_margin = template_match.right_margin;
+            bottom_margin = template_match.bottom_margin;
+        }
+
+        {
+            const int physical_landscape = corners_are_physically_landscape(corners);
+            const int template_landscape = outer_w >= outer_h;
+            if (physical_landscape != template_landscape) {
+                rotate_template_90cw(
+                    &outer_w,
+                    &outer_h,
+                    &image_w,
+                    &image_h,
+                    &left_margin,
+                    &top_margin,
+                    &right_margin,
+                    &bottom_margin
+                );
+            }
+        }
+
+        result.corrected_width = (int)(outer_w + 0.5f);
+        result.corrected_height = (int)(outer_h + 0.5f);
+        result.inner_corrected_width = (int)(image_w + 0.5f);
+        result.inner_corrected_height = (int)(image_h + 0.5f);
+        result.outer_aspect = normalized_ratio(outer_w, outer_h);
+        result.inner_aspect = normalized_ratio(image_w, image_h);
+
+        instant_homography outer_to_source;
+        if (homography_from_canonical_to_source(outer_w, outer_h, corners, &outer_to_source)) {
+            float x0 = left_margin;
+            float y0 = top_margin;
+            float x1 = outer_w - right_margin;
+            float y1 = outer_h - bottom_margin;
+
+            refine_inner_window_rect(
+                rgba, width, height, stride,
+                corners,
+                outer_w, outer_h,
+                x0, y0, x1, y1,
+                &x0, &y0, &x1, &y1
+            );
+
+            {
+                const float side_trim = clampf_local(fminf(x0, outer_w - x1) * 0.22f, 0.40f, 1.25f);
+                const float top_trim = clampf_local(y0 * 0.35f, 0.45f, 1.90f);
+                const float bottom_trim = clampf_local((outer_h - y1) * 0.12f, 0.40f, 2.20f);
+                x0 += side_trim;
+                x1 -= side_trim;
+                y0 += top_trim;
+                y1 -= bottom_trim;
+            }
+
+            result.inner_corrected_width = (int)((x1 - x0) + 0.5f);
+            result.inner_corrected_height = (int)((y1 - y0) + 0.5f);
+            result.inner_aspect = normalized_ratio(x1 - x0, y1 - y0);
+            result.inner_corners[0] = homography_map_point(&outer_to_source, x0, y0);
+            result.inner_corners[1] = homography_map_point(&outer_to_source, x1, y0);
+            result.inner_corners[2] = homography_map_point(&outer_to_source, x1, y1);
+            result.inner_corners[3] = homography_map_point(&outer_to_source, x0, y1);
+        }
+    }
+
     if (!result.success) {
         if (type == INSTANT_FILM_UNKNOWN) {
             strncpy(result.error, "Found a white border, but its ratio does not match a known film type.", sizeof(result.error) - 1);
@@ -1007,7 +1268,7 @@ static void sample_bilinear_rgba(
     }
 }
 
-int instant_extract_rgba(
+int instant_extract_quad_rgba(
     const unsigned char *rgba,
     int width,
     int height,
@@ -1040,4 +1301,32 @@ int instant_extract_rgba(
     }
 
     return 1;
+}
+
+int instant_extract_rgba(
+    const unsigned char *rgba,
+    int width,
+    int height,
+    int stride,
+    const instant_point corners[4],
+    int output_width,
+    int output_height,
+    unsigned char *out_rgba,
+    int out_stride
+) {
+    return instant_extract_quad_rgba(rgba, width, height, stride, corners, output_width, output_height, out_rgba, out_stride);
+}
+
+int instant_extract_inner_rgba(
+    const unsigned char *rgba,
+    int width,
+    int height,
+    int stride,
+    const instant_point inner_corners[4],
+    int output_width,
+    int output_height,
+    unsigned char *out_rgba,
+    int out_stride
+) {
+    return instant_extract_quad_rgba(rgba, width, height, stride, inner_corners, output_width, output_height, out_rgba, out_stride);
 }

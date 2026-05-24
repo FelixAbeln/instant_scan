@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import ctypes
 from pathlib import Path
-from typing import Optional
+from typing import Optional, Sequence
 
 import numpy as np
 
@@ -28,8 +28,11 @@ class Result(ctypes.Structure):
         ("film_type", ctypes.c_int),
         ("confidence", ctypes.c_float),
         ("corners", Point * 4),
+        ("inner_corners", Point * 4),
         ("corrected_width", ctypes.c_int),
         ("corrected_height", ctypes.c_int),
+        ("inner_corrected_width", ctypes.c_int),
+        ("inner_corrected_height", ctypes.c_int),
         ("outer_aspect", ctypes.c_float),
         ("inner_aspect", ctypes.c_float),
         ("error", ctypes.c_char * 128),
@@ -62,7 +65,7 @@ class InstantScan:
         ]
         self.lib.instant_classify_film_by_outer_ratio.restype = ctypes.c_int
 
-        self.lib.instant_extract_rgba.argtypes = [
+        self.lib.instant_extract_quad_rgba.argtypes = [
             ctypes.POINTER(ctypes.c_ubyte),
             ctypes.c_int,
             ctypes.c_int,
@@ -73,7 +76,13 @@ class InstantScan:
             ctypes.POINTER(ctypes.c_ubyte),
             ctypes.c_int,
         ]
+        self.lib.instant_extract_quad_rgba.restype = ctypes.c_int
+
+        self.lib.instant_extract_rgba.argtypes = self.lib.instant_extract_quad_rgba.argtypes
         self.lib.instant_extract_rgba.restype = ctypes.c_int
+
+        self.lib.instant_extract_inner_rgba.argtypes = self.lib.instant_extract_quad_rgba.argtypes
+        self.lib.instant_extract_inner_rgba.restype = ctypes.c_int
 
         self.lib.instant_film_type_name.argtypes = [ctypes.c_int]
         self.lib.instant_film_type_name.restype = ctypes.c_char_p
@@ -105,9 +114,14 @@ class InstantScan:
         ptr = image.ctypes.data_as(ctypes.POINTER(ctypes.c_ubyte))
         return self.lib.instant_scan_rgba(ptr, width, height, image.strides[0], options)
 
-
-    def extract_rgba(self, image: np.ndarray, result: Result, output_width: int, output_height: int) -> np.ndarray:
-        """Perspective-correct the detected outer film frame, including the border."""
+    def _extract_with_corners(
+        self,
+        image: np.ndarray,
+        corners: Sequence[Point],
+        output_width: int,
+        output_height: int,
+        fn_name: str = "instant_extract_quad_rgba",
+    ) -> np.ndarray:
         if image.dtype != np.uint8:
             raise TypeError("image must be uint8")
         if image.ndim != 3 or image.shape[2] != 4:
@@ -119,17 +133,35 @@ class InstantScan:
         height, width, _ = image.shape
         out = np.empty((output_height, output_width, 4), dtype=np.uint8)
 
-        ok = self.lib.instant_extract_rgba(
+        if isinstance(corners, ctypes.Array):
+            point_array = corners
+        else:
+            point_array = (Point * 4)(*corners)
+
+        fn = getattr(self.lib, fn_name)
+        ok = fn(
             image.ctypes.data_as(ctypes.POINTER(ctypes.c_ubyte)),
             width,
             height,
             image.strides[0],
-            result.corners,
+            point_array,
             output_width,
             output_height,
             out.ctypes.data_as(ctypes.POINTER(ctypes.c_ubyte)),
             out.strides[0],
         )
         if not ok:
-            raise RuntimeError("instant_extract_rgba failed")
+            raise RuntimeError(f"{fn_name} failed")
         return out
+
+    def extract_rgba(self, image: np.ndarray, result: Result, output_width: int, output_height: int) -> np.ndarray:
+        """Perspective-correct the detected outer film frame, including the border."""
+        return self._extract_with_corners(image, result.corners, output_width, output_height, "instant_extract_rgba")
+
+    def extract_inner_rgba(self, image: np.ndarray, result: Result, output_width: int, output_height: int) -> np.ndarray:
+        """Perspective-correct only the visible inner image area."""
+        return self._extract_with_corners(image, result.inner_corners, output_width, output_height, "instant_extract_inner_rgba")
+
+    def extract_quad_rgba(self, image: np.ndarray, corners: Sequence[Point], output_width: int, output_height: int) -> np.ndarray:
+        """Generic helper for perspective-correcting an arbitrary quadrilateral."""
+        return self._extract_with_corners(image, corners, output_width, output_height, "instant_extract_quad_rgba")

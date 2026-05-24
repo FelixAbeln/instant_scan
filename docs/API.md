@@ -50,9 +50,12 @@ typedef struct {
     float confidence;
 
     instant_point corners[4];
+    instant_point inner_corners[4];
 
     int corrected_width;
     int corrected_height;
+    int inner_corrected_width;
+    int inner_corrected_height;
 
     float outer_aspect;
     float inner_aspect;
@@ -67,8 +70,11 @@ typedef struct {
 | `film_type` | Detected film format. See `instant_film_type`. |
 | `confidence` | Approximate confidence from `0.0` to `1.0`. |
 | `corners` | Detected outer corners in source image order: top-left, top-right, bottom-right, bottom-left. |
-| `corrected_width` | Suggested corrected crop width. Currently based on the detected film template dimensions. |
-| `corrected_height` | Suggested corrected crop height. |
+| `inner_corners` | Visible inner image-window corners in the same source-image order. |
+| `corrected_width` | Suggested corrected full-print width based on the detected film template. |
+| `corrected_height` | Suggested corrected full-print height. |
+| `inner_corrected_width` | Suggested corrected width for the inner image only. |
+| `inner_corrected_height` | Suggested corrected height for the inner image only. |
 | `outer_aspect` | Outer frame aspect ratio used by classifier. |
 | `inner_aspect` | Inner image-window aspect ratio from film template. |
 | `error` | Human-readable note/error string. Empty on normal success. |
@@ -122,7 +128,25 @@ Arguments:
 | `stride` | Bytes per row. Usually `width * 4`, but may be larger on Android/bitmap buffers. |
 | `options` | Options returned by `instant_default_options()`. |
 
-Returns an `instant_result`. If `success != 0`, the `corners` field can be passed to `instant_extract_rgba`.
+Returns an `instant_result`. If `success != 0`, the `corners` field can be passed to `instant_extract_rgba`, and `inner_corners` can be passed to `instant_extract_inner_rgba` or `instant_extract_quad_rgba`.
+
+## `instant_extract_quad_rgba`
+
+```c
+int instant_extract_quad_rgba(
+    const unsigned char *rgba,
+    int width,
+    int height,
+    int stride,
+    const instant_point corners[4],
+    int output_width,
+    int output_height,
+    unsigned char *out_rgba,
+    int out_stride
+);
+```
+
+Generic perspective warp helper for any quadrilateral. The convenience APIs below both call this internally.
 
 ## `instant_extract_rgba`
 
@@ -191,3 +215,21 @@ Each row has:
 ```
 
 Keep dimensions in millimeters. Margins describe the visible image window position inside the outer frame.
+
+## `instant_extract_inner_rgba`
+
+```c
+int instant_extract_inner_rgba(
+    const unsigned char *rgba,
+    int width,
+    int height,
+    int stride,
+    const instant_point inner_corners[4],
+    int output_width,
+    int output_height,
+    unsigned char *out_rgba,
+    int out_stride
+);
+```
+
+Perspective-warps only the visible inner image area, without the white border. This is the API to use for reprinting or archiving just the photo content.

@@ -23,10 +23,17 @@ typedef struct {
     instant_film_type film_type;
     float confidence;
 
-    instant_point corners[4]; /* top-left, top-right, bottom-right, bottom-left */
+    /* Outer print corners: top-left, top-right, bottom-right, bottom-left. */
+    instant_point corners[4];
+
+    /* Inner visible-image window corners in the same order. */
+    instant_point inner_corners[4];
 
     int corrected_width;
     int corrected_height;
+
+    int inner_corrected_width;
+    int inner_corrected_height;
 
     float outer_aspect;
     float inner_aspect;
@@ -49,12 +56,38 @@ instant_result instant_scan_rgba(
  * RGBA image. The crop includes the full outer border. The caller owns
  * out_rgba and chooses the output size. Returns non-zero on success.
  */
+int instant_extract_quad_rgba(
+    const unsigned char *rgba,
+    int width,
+    int height,
+    int stride,
+    const instant_point corners[4],
+    int output_width,
+    int output_height,
+    unsigned char *out_rgba,
+    int out_stride
+);
+
+/* Convenience wrapper for the full print including the white border. */
 int instant_extract_rgba(
     const unsigned char *rgba,
     int width,
     int height,
     int stride,
     const instant_point corners[4],
+    int output_width,
+    int output_height,
+    unsigned char *out_rgba,
+    int out_stride
+);
+
+/* Convenience wrapper for the inner visible image only, without the border. */
+int instant_extract_inner_rgba(
+    const unsigned char *rgba,
+    int width,
+    int height,
+    int stride,
+    const instant_point inner_corners[4],
     int output_width,
     int output_height,
     unsigned char *out_rgba,

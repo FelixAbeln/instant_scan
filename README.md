@@ -11,6 +11,7 @@ Current capabilities:
 - Preserves handwritten text on the border in exported crops.
 - Classifies common instant-film formats from dimensions and border layout.
 - Exports a perspective-corrected image including the full white border.
+- Exports a perspective-corrected inner image without the border for reprinting.
 - Provides Python `ctypes` hooks for quick testing.
 
 ## Supported film formats
@@ -133,6 +134,7 @@ The report includes:
 - original input image
 - detected corner overlay
 - perspective-corrected crop including the white border
+- perspective-corrected inner image only
 - expected film type
 - detected film type
 - confidence
@@ -150,7 +152,7 @@ build/evaluation/metrics.json
 ## Scan a real image
 
 ```bash
-python3 tools/scan_image.py path/to/photo.jpg --export-dir exports --export-width 1600
+python3 tools/scan_image.py path/to/photo.jpg --export-dir exports --export-width 1600 --export-both
 ```
 
 Example output:
@@ -163,16 +165,25 @@ photo.jpg
   confidence: 0.998
   outer_aspect: 1.256
   inner_aspect: 1.597
-  corrected_size: 108 x 86
-  corners:
+  corrected_outer_size: 108 x 86
+  corrected_inner_size: 99 x 62
+  outer corners:
     TL: (23.0, 263.0)
     TR: (691.0, 263.0)
     BR: (691.0, 1107.0)
     BL: (23.0, 1107.0)
-  exported: exports/photo_instant_border.png (1600 x 1274)
+  inner corners:
+    TL: (50.8, 312.1)
+    TR: (661.7, 312.1)
+    BR: (661.7, 918.6)
+    BL: (50.8, 918.6)
+  exported border: exports/photo_instant_border.png (1600 x 1274)
+  exported inner:  exports/photo_instant_inner.png (1467 x 918)
 ```
 
-The exported image includes the full border, so handwritten notes/dates on the border remain visible.
+The full-print export includes the border, so handwritten notes/dates on the border remain visible. The inner-image export is useful for reprinting just the photo area.
+
+Exports from the Python CLI and evaluation tool are auto-rotated into canonical viewing orientation. For example, Instax Wide exports are landscape with the larger border at the bottom.
 
 ## C usage
 
@@ -269,3 +280,20 @@ See [docs/ALGORITHM.md](docs/ALGORITHM.md) for implementation details and future
 ## License
 
 MIT. See [LICENSE](LICENSE).
+
+
+To export only the inner visible image window:
+
+```c
+int ok = instant_extract_inner_rgba(
+    rgba_pixels,
+    width,
+    height,
+    stride_bytes,
+    result.inner_corners,
+    inner_output_width,
+    inner_output_height,
+    output_rgba,
+    output_stride_bytes
+);
+```

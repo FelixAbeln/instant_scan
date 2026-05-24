@@ -22,7 +22,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "python"))
 
 from instant_scan import InstantScan  # noqa: E402
-from scan_image import choose_export_size  # noqa: E402
+from scan_image import apply_rotation_k, canonical_rotation_k_for_crop, choose_export_size, choose_inner_export_size  # noqa: E402
 
 
 @dataclass
@@ -37,12 +37,16 @@ class EvalRow:
     inner_aspect: float
     corrected_width: int
     corrected_height: int
+    inner_corrected_width: int
+    inner_corrected_height: int
     input_rel: str
     overlay_rel: str
     output_rel: str
+    inner_output_rel: str
     notes: str
     error: str
     corners: list[list[float]]
+    inner_corners: list[list[float]]
 
 
 def load_expected(path: Path) -> list[dict[str, Any]]:
@@ -57,7 +61,12 @@ def safe_error(error_array: Any) -> str:
     return bytes(error_array).split(b"\0", 1)[0].decode("utf-8", errors="replace")
 
 
-def draw_overlay(image: Image.Image, corners: list[tuple[float, float]], out_path: Path) -> None:
+def draw_overlay(
+    image: Image.Image,
+    corners: list[tuple[float, float]],
+    inner_corners: list[tuple[float, float]],
+    out_path: Path,
+) -> None:
     overlay = image.convert("RGBA")
     draw = ImageDraw.Draw(overlay, "RGBA")
     if len(corners) == 4:
@@ -68,6 +77,9 @@ def draw_overlay(image: Image.Image, corners: list[tuple[float, float]], out_pat
         for label, (x, y) in zip(labels, pts):
             draw.ellipse((x - radius, y - radius, x + radius, y + radius), fill=(255, 0, 0, 220))
             draw.text((x + radius + 2, y + radius + 2), label, fill=(255, 255, 255, 255))
+    if len(inner_corners) == 4:
+        pts = [(float(x), float(y)) for x, y in inner_corners]
+        draw.line(pts + [pts[0]], fill=(255, 193, 7, 230), width=max(2, image.width // 260))
     overlay.convert("RGB").save(out_path, quality=92)
 
 
@@ -79,9 +91,13 @@ def generate_html(rows: list[EvalRow], out_dir: Path, title: str = "instant_scan
     cards = []
     for row in rows:
         status = "pass" if row.pass_ else "fail"
-        corners = "<br>".join(
+        outer_corners = "<br>".join(
             f"{name}: ({x:.1f}, {y:.1f})"
             for name, (x, y) in zip(["TL", "TR", "BR", "BL"], row.corners)
+        )
+        inner_corners = "<br>".join(
+            f"{name}: ({x:.1f}, {y:.1f})"
+            for name, (x, y) in zip(["TL", "TR", "BR", "BL"], row.inner_corners)
         )
         cards.append(
             f"""
@@ -94,17 +110,20 @@ def generate_html(rows: list[EvalRow], out_dir: Path, title: str = "instant_scan
                 <div><b>Confidence</b><span>{row.confidence:.3f}</span></div>
                 <div><b>Outer aspect</b><span>{row.outer_aspect:.3f}</span></div>
                 <div><b>Inner aspect</b><span>{row.inner_aspect:.3f}</span></div>
-                <div><b>Corrected size</b><span>{row.corrected_width} × {row.corrected_height}</span></div>
+                <div><b>Outer size</b><span>{row.corrected_width} × {row.corrected_height}</span></div>
+                <div><b>Inner size</b><span>{row.inner_corrected_width} × {row.inner_corrected_height}</span></div>
                 <div><b>Success</b><span>{row.success}</span></div>
               </div>
               <p class="notes">{html.escape(row.notes)}</p>
               {f'<p class="error">{html.escape(row.error)}</p>' if row.error else ''}
               <div class="images">
                 <figure><img src="{html.escape(row.input_rel)}" loading="lazy"><figcaption>input</figcaption></figure>
-                <figure><img src="{html.escape(row.overlay_rel)}" loading="lazy"><figcaption>detected corners</figcaption></figure>
-                <figure><img src="{html.escape(row.output_rel)}" loading="lazy"><figcaption>extracted border crop</figcaption></figure>
+                <figure><img src="{html.escape(row.overlay_rel)}" loading="lazy"><figcaption>detected outer + inner corners</figcaption></figure>
+                <figure><img src="{html.escape(row.output_rel)}" loading="lazy"><figcaption>extracted full print</figcaption></figure>
+                <figure><img src="{html.escape(row.inner_output_rel)}" loading="lazy"><figcaption>extracted inner image</figcaption></figure>
               </div>
-              <details><summary>corner coordinates</summary><code>{corners}</code></details>
+              <details><summary>outer corner coordinates</summary><code>{outer_corners}</code></details>
+              <details><summary>inner corner coordinates</summary><code>{inner_corners}</code></details>
             </section>
             """
         )
@@ -118,11 +137,11 @@ def generate_html(rows: list[EvalRow], out_dir: Path, title: str = "instant_scan
   <style>
     :root {{ color-scheme: light dark; font-family: system-ui, -apple-system, Segoe UI, sans-serif; }}
     body {{ margin: 0; padding: 24px; background: #f6f7f9; color: #202124; }}
-    header {{ max-width: 1200px; margin: 0 auto 24px; }}
+    header {{ max-width: 1400px; margin: 0 auto 24px; }}
     h1 {{ margin: 0 0 8px; }}
     .summary {{ display: flex; gap: 12px; flex-wrap: wrap; }}
     .summary div {{ background: white; border-radius: 12px; padding: 12px 16px; box-shadow: 0 1px 4px #0001; }}
-    main {{ max-width: 1200px; margin: 0 auto; display: grid; gap: 20px; }}
+    main {{ max-width: 1400px; margin: 0 auto; display: grid; gap: 20px; }}
     .card {{ background: white; border-radius: 18px; padding: 18px; box-shadow: 0 2px 12px #0001; border-left: 8px solid #999; }}
     .card.pass {{ border-left-color: #16833a; }}
     .card.fail {{ border-left-color: #b42318; }}
@@ -173,7 +192,8 @@ def evaluate(args: argparse.Namespace) -> int:
     inputs_dir = assets_dir / "inputs"
     overlays_dir = assets_dir / "overlays"
     exports_dir = assets_dir / "exports"
-    for directory in [inputs_dir, overlays_dir, exports_dir]:
+    inner_exports_dir = assets_dir / "inner_exports"
+    for directory in [inputs_dir, overlays_dir, exports_dir, inner_exports_dir]:
         directory.mkdir(parents=True, exist_ok=True)
 
     scanner = InstantScan(args.lib)
@@ -192,20 +212,30 @@ def evaluate(args: argparse.Namespace) -> int:
         result = scanner.scan_rgba(rgba)
         detected = scanner.film_name(result.film_type)
         corners = [(float(p.x), float(p.y)) for p in result.corners]
+        inner_corners = [(float(p.x), float(p.y)) for p in result.inner_corners]
         error = safe_error(result.error)
 
         input_out = inputs_dir / source_path.name
         overlay_out = overlays_dir / f"{source_path.stem}_overlay.jpg"
         export_out = exports_dir / f"{source_path.stem}_instant_border.png"
+        inner_export_out = inner_exports_dir / f"{source_path.stem}_instant_inner.png"
         shutil.copy2(source_path, input_out)
-        draw_overlay(image, corners if result.success else [], overlay_out)
+        draw_overlay(image, corners if result.success else [], inner_corners if result.success else [], overlay_out)
 
         if result.success:
             out_w, out_h = choose_export_size(result, args.export_width)
             crop = scanner.extract_rgba(rgba, result, out_w, out_h)
+            rotation_k = canonical_rotation_k_for_crop(crop, int(result.film_type))
+            crop = apply_rotation_k(crop, rotation_k)
             Image.fromarray(crop, mode="RGBA").save(export_out)
+
+            inner_w, inner_h = choose_inner_export_size(result, args.export_width)
+            inner_crop = scanner.extract_inner_rgba(rgba, result, inner_w, inner_h)
+            inner_crop = apply_rotation_k(inner_crop, rotation_k)
+            Image.fromarray(inner_crop, mode="RGBA").save(inner_export_out)
         else:
             Image.new("RGBA", (400, 280), (240, 240, 240, 255)).save(export_out)
+            Image.new("RGBA", (360, 240), (240, 240, 240, 255)).save(inner_export_out)
 
         passed = bool(result.success) and detected == expected_film and result.confidence >= args.min_confidence
         rows.append(
@@ -220,12 +250,16 @@ def evaluate(args: argparse.Namespace) -> int:
                 inner_aspect=float(result.inner_aspect),
                 corrected_width=int(result.corrected_width),
                 corrected_height=int(result.corrected_height),
+                inner_corrected_width=int(result.inner_corrected_width),
+                inner_corrected_height=int(result.inner_corrected_height),
                 input_rel=str(input_out.relative_to(out_dir)),
                 overlay_rel=str(overlay_out.relative_to(out_dir)),
                 output_rel=str(export_out.relative_to(out_dir)),
+                inner_output_rel=str(inner_export_out.relative_to(out_dir)),
                 notes=notes,
                 error=error,
                 corners=[[float(x), float(y)] for x, y in corners],
+                inner_corners=[[float(x), float(y)] for x, y in inner_corners],
             )
         )
 
