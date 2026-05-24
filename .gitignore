@@ -1,0 +1,38 @@
+# Build outputs
+build/
+cmake-build-*/
+CMakeFiles/
+CMakeCache.txt
+Makefile
+cmake_install.cmake
+*.o
+*.obj
+*.a
+*.so
+*.so.*
+*.dylib
+*.dll
+*.lib
+*.exe
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.env
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Generated images / local test data
+exports/
+export_test/
+*_instant_border.png
+*.tmp
+
+# Editors / OS
+.DS_Store
+.idea/
+.vscode/
+*.swp
