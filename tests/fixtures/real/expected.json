@@ -1,0 +1,29 @@
+{
+  "images": [
+    {
+      "file": "instax_wide_dark_table_1.jpg",
+      "expected_film": "Instax Wide",
+      "notes": "Angled photo on dark table. Previously difficult for ratio-only classification."
+    },
+    {
+      "file": "instax_wide_dark_table_2.jpg",
+      "expected_film": "Instax Wide",
+      "notes": "Angled photo on dark table with background clutter."
+    },
+    {
+      "file": "instax_wide_dark_table_3.jpg",
+      "expected_film": "Instax Wide",
+      "notes": "Cleaner Instax Wide reference on dark table."
+    },
+    {
+      "file": "instax_wide_handwritten_border.jpg",
+      "expected_film": "Instax Wide",
+      "notes": "Handwritten bottom border; export should preserve writing."
+    },
+    {
+      "file": "instax_mini_wood_table.jpg",
+      "expected_film": "Instax Mini",
+      "notes": "Portrait Instax Mini on wood table."
+    }
+  ]
+}

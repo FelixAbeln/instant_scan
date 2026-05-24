@@ -48,17 +48,21 @@ python/
   instant_scan.py             Python ctypes wrapper
 tools/
   scan_image.py               CLI for testing real photos
+  evaluate_fixtures.py        Real-image evaluation report generator
 tests/
   test_ratio.py               Ratio classifier smoke test
   test_detect_synthetic.py    Synthetic clean-frame test
   test_detect_skewed.py       Synthetic skew test
   test_detect_border_text.py  Handwriting/noisy-border test
+  test_real_image_evaluation.py HTML report / real fixture test
+  fixtures/real/              Real test photos and expected labels
 android/
   CMakeLists.txt              Android NDK integration starter
 docs/
   API.md
   ANDROID.md
   ALGORITHM.md
+  EVALUATION.md
 ```
 
 ## Build
@@ -100,6 +104,47 @@ python3 tests/test_ratio.py
 python3 tests/test_detect_synthetic.py
 python3 tests/test_detect_skewed.py
 python3 tests/test_detect_border_text.py
+python3 tests/test_real_image_evaluation.py
+```
+
+The real-image test writes an HTML report to:
+
+```text
+build/evaluation/report.html
+```
+
+## Evaluate the bundled real-image fixtures
+
+The repository includes the real test images used while developing the detector. To generate a visual report with input images, detected corner overlays, corrected output crops, and metrics:
+
+```bash
+python3 tools/evaluate_fixtures.py --fail-on-mismatch
+```
+
+Open the generated report:
+
+```text
+build/evaluation/report.html
+```
+
+The report includes:
+
+```text
+- original input image
+- detected corner overlay
+- perspective-corrected crop including the white border
+- expected film type
+- detected film type
+- confidence
+- outer / inner aspect metrics
+- corrected output size
+- corner coordinates
+```
+
+The same data is also written as JSON:
+
+```text
+build/evaluation/metrics.json
 ```
 
 ## Scan a real image

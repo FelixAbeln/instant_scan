@@ -31,3 +31,4 @@ jobs:
           python tests/test_detect_synthetic.py
           python tests/test_detect_skewed.py
           python tests/test_detect_border_text.py
+          python tests/test_real_image_evaluation.py
