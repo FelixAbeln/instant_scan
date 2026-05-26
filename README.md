@@ -66,6 +66,16 @@ docs/
   EVALUATION.md
 ```
 
+## Visual pipeline and theory docs
+
+The main algorithm is documented with diagrams and the required math:
+
+- [Pipeline overview](docs/PIPELINE.md)
+- [Math and theory](docs/THEORY.md)
+- [Algorithm notes](docs/ALGORITHM.md)
+
+These docs explain the white-border mask, morphological closing, connected components, line fitting, homography/perspective correction, film-template scoring, inner-image extraction, and export orientation normalization.
+
 ## Build
 
 Requirements:

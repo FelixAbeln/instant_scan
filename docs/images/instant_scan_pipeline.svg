@@ -1,0 +1,69 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1120" height="360" viewBox="0 0 1120 360">
+  <defs>
+    <style>
+      .box { fill:#f8fafc; stroke:#334155; stroke-width:2; rx:14; }
+      .hot { fill:#ecfeff; stroke:#0891b2; stroke-width:2; rx:14; }
+      .out { fill:#f0fdf4; stroke:#16a34a; stroke-width:2; rx:14; }
+      .text { font-family: Inter, ui-sans-serif, system-ui, -apple-system, Segoe UI, sans-serif; font-size:16px; fill:#0f172a; text-anchor:middle; dominant-baseline:middle; }
+      .small { font-size:13px; fill:#475569; }
+      .arrow { stroke:#64748b; stroke-width:2.5; fill:none; marker-end:url(#arrow); }
+    </style>
+    <marker id="arrow" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto" markerUnits="strokeWidth">
+      <path d="M0,0 L0,6 L9,3 z" fill="#64748b"/>
+    </marker>
+  </defs>
+
+  <rect x="30" y="70" width="130" height="70" class="box"/>
+  <text x="95" y="96" class="text">Input</text>
+  <text x="95" y="120" class="text small">RGBA pixels</text>
+
+  <rect x="205" y="70" width="130" height="70" class="box"/>
+  <text x="270" y="96" class="text">White mask</text>
+  <text x="270" y="120" class="text small">bright + neutral</text>
+
+  <rect x="380" y="70" width="130" height="70" class="box"/>
+  <text x="445" y="96" class="text">Mask repair</text>
+  <text x="445" y="120" class="text small">closing</text>
+
+  <rect x="555" y="70" width="130" height="70" class="box"/>
+  <text x="620" y="96" class="text">Components</text>
+  <text x="620" y="120" class="text small">best frame</text>
+
+  <rect x="730" y="70" width="130" height="70" class="hot"/>
+  <text x="795" y="96" class="text">Fit lines</text>
+  <text x="795" y="120" class="text small">4 sides</text>
+
+  <rect x="905" y="70" width="150" height="70" class="hot"/>
+  <text x="980" y="96" class="text">Outer corners</text>
+  <text x="980" y="120" class="text small">TL TR BR BL</text>
+
+  <rect x="205" y="220" width="150" height="70" class="box"/>
+  <text x="280" y="246" class="text">Template score</text>
+  <text x="280" y="270" class="text small">film type</text>
+
+  <rect x="410" y="220" width="150" height="70" class="box"/>
+  <text x="485" y="246" class="text">Inner window</text>
+  <text x="485" y="270" class="text small">margins + refine</text>
+
+  <rect x="615" y="220" width="150" height="70" class="hot"/>
+  <text x="690" y="246" class="text">Homography</text>
+  <text x="690" y="270" class="text small">perspective warp</text>
+
+  <rect x="820" y="190" width="170" height="55" class="out"/>
+  <text x="905" y="218" class="text">Full print export</text>
+
+  <rect x="820" y="265" width="170" height="55" class="out"/>
+  <text x="905" y="293" class="text">Inner image export</text>
+
+  <path d="M160 105 H205" class="arrow"/>
+  <path d="M335 105 H380" class="arrow"/>
+  <path d="M510 105 H555" class="arrow"/>
+  <path d="M685 105 H730" class="arrow"/>
+  <path d="M860 105 H905" class="arrow"/>
+
+  <path d="M980 140 C980 180 280 170 280 220" class="arrow"/>
+  <path d="M355 255 H410" class="arrow"/>
+  <path d="M560 255 H615" class="arrow"/>
+  <path d="M765 255 C790 255 795 218 820 218" class="arrow"/>
+  <path d="M765 255 C790 255 795 293 820 293" class="arrow"/>
+</svg>
